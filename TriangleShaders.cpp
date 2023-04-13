@@ -43,17 +43,33 @@ private:
 };
 
 class TriTexShader : public GShader {
+public:
+    TriTexShader(GPoint vertexTexCoords[3], GPoint vertices[3], GShader* shaderProvider) : shaderProvider(shaderProvider) {
+        std::copy(vertexTexCoords, vertexTexCoords + 3, TexCoords);
+        GMatrix((vertices[1].fX - vertices[0].fX), (vertices[2].fX - vertices[0].fX), vertices[0].fX, 
+        (vertices[1].fY - vertices[0].fY), (vertices[2].fY - vertices[0].fY), vertices[0].fY).invert(&deviceToBarycentric);
+        GMatrix tex_inv;
+        GMatrix((TexCoords[1].fX - TexCoords[0].fX), (TexCoords[2].fX - TexCoords[0].fX), TexCoords[0].fX,
+        TexCoords[1].fY - TexCoords[0].fY, TexCoords[2].fY - TexCoords[0].fY, TexCoords[0].fY).invert(&tex_inv);
+        m = GMatrix::Concat(deviceToBarycentric, tex_inv);
+    }
+
     bool isOpaque() {
-        return true;
+        return shaderProvider->isOpaque();
     }
 
     bool setContext(const GMatrix& ctm) {
-        return true;
+        return shaderProvider->setContext(ctm * m);
     }
 
     void shadeRow(int x, int y, int count, GPixel row[]) {
-        return;
+        shaderProvider->shadeRow(x, y, count, row);
     }
+private:
+    GShader* shaderProvider;
+    GMatrix m;
+    GMatrix deviceToBarycentric;
+    GPoint TexCoords[3];
 };
 
 class TriColorTexShader : public GShader {
