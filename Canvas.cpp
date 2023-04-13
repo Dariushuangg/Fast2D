@@ -10,6 +10,7 @@
 #include "./GEdge.h"
 #include "./GBlenders.h"
 #include "./BezierCurve.h"
+#include "./TriangleShaders.h"
 
 using namespace std;
 
@@ -38,6 +39,61 @@ public:
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
+
+    void drawMesh(const GPoint verts[], const GColor colors[], const GPoint texs[],
+                          int count, const int indices[], const GPaint& textureShader) override 
+    {
+        bool hasColor = colors != nullptr;
+        bool hasTex = texs != nullptr;
+        if (!hasColor && !hasTex) {
+            return;
+        }
+
+        GPoint pts[3];
+        for (int i = 0; i < count; i += 3) {
+            pts[0] = verts[indices[i]];
+            pts[1] = verts[indices[i+1]];
+            pts[2] = verts[indices[i+2]];
+            if (hasColor) {
+                GColor cols[3];
+                cols[0] = colors[indices[i]];
+                cols[1] = colors[indices[i+1]];
+                cols[2] = colors[indices[i+2]];
+                std::unique_ptr<GShader> cs = GCreateTriColorShader(cols, pts);
+                if (hasTex) {
+                    // has color, has texture
+                    GPoint tex[3];
+                    tex[0] = texs[indices[i]];
+                    tex[1] = texs[indices[i+1]];
+                    tex[2] = texs[indices[i+2]];
+                    std::unique_ptr<GShader> ts 
+                        = GCreateTriTexShader(tex, pts, textureShader.getShader());
+                    std::unique_ptr<GShader> tcs 
+                        = GCreateTriColorTexShader((TriTexShader*)(ts.get()),
+                            (TriColorShader*)(cs.get()));
+                    drawConvexPolygon(pts, 3, GPaint(tcs.get()));
+                } else {
+                    // has color, no texture
+                    drawConvexPolygon(pts, 3, GPaint(cs.get()));
+                }
+            } else { // no color, has texture
+                GPoint tex[3];
+                tex[0] = texs[indices[i]];
+                tex[1] = texs[indices[i+1]];
+                tex[2] = texs[indices[i+2]];
+                std::unique_ptr<GShader> ts 
+                    = GCreateTriTexShader(tex, pts, textureShader.getShader());
+                drawConvexPolygon(pts, 3, GPaint(ts.get()));
+            }
+        }
+    }
+
+    void drawQuad(const GPoint verts[4], const GColor colors[4], const GPoint texs[4],
+                          int level, const GPaint&)
+    {
+
+    }
+
 
     /**
      *  Fill the entire canvas with the specified color, using the specified blendmode.

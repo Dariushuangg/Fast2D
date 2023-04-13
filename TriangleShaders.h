@@ -98,3 +98,15 @@ private:
     TriTexShader* ts;
     TriColorShader* cs;
 };
+
+std::unique_ptr<GShader> GCreateTriColorShader(GColor vertexColors[3], GPoint vertices[3]) {
+    return std::unique_ptr<GShader>(new TriColorShader(vertexColors, vertices));
+}
+
+std::unique_ptr<GShader> GCreateTriTexShader(GPoint vertexTexCoords[3], GPoint vertices[3], GShader* textureProvider) {
+    return std::unique_ptr<GShader>(new TriTexShader(vertexTexCoords, vertices, textureProvider));
+}
+
+std::unique_ptr<GShader> GCreateTriColorTexShader(TriTexShader* texShader, TriColorShader* colorShader) {
+    return std::unique_ptr<GShader>(new TriColorTexShader(texShader, colorShader));
+}
