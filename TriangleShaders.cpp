@@ -73,15 +73,28 @@ private:
 };
 
 class TriColorTexShader : public GShader {
+public:
+    TriColorTexShader(TriTexShader* texShader, TriColorShader* colorShader) : 
+    ts(texShader), cs(colorShader) {}
+
     bool isOpaque() {
-        return true;
+        return ts->isOpaque() && cs->isOpaque();
     }
 
     bool setContext(const GMatrix& ctm) {
-        return true;
+        return ts->setContext(ctm) && cs->setContext(ctm);
     }
 
     void shadeRow(int x, int y, int count, GPixel row[]) {
-        return;
+        GPixel* texRow = new GPixel[count];
+        ts->shadeRow(x, y, count, texRow);
+        cs->shadeRow(x, y, count, row);
+        for (int i = 0; i < count; i ++) {
+            // ans[i] = (row[i]/255) * (texRow[i]/255) * 255
+            row[i] = row[i] * texRow[i] / 255; 
+        }
     }
+private:
+    TriTexShader* ts;
+    TriColorShader* cs;
 };
