@@ -89,9 +89,66 @@ public:
     }
 
     void drawQuad(const GPoint verts[4], const GColor colors[4], const GPoint texs[4],
-                          int level, const GPaint&)
+                          int level, const GPaint& paint)
     {
+        bool hasColor = colors != nullptr;
+        bool hasTex = texs != nullptr;
+        if (!hasColor && !hasTex) {
+            return;
+        }
+        else if (hasColor && !hasTex) {
+            drawColorQuad(verts, colors, level, paint);
+        } else if (!hasColor && hasTex){
+            drawTexQuad(verts, texs, level, paint);
+        } else {
 
+        }
+    }
+
+    void drawColorQuad(const GPoint verts[4], const GColor colors[4], int level, const GPaint&) {
+        
+    }
+
+    void drawTexQuad(const GPoint verts[4], const GPoint texs[4], int level, const GPaint&) {
+
+    }
+
+    /// @brief Calculate the coordinates of the vertices of each sub-quads
+    /// @param verts Vertices of the large quad
+    /// @param level LoD
+    /// @return 2-D array of vertices
+    //  *  Each quad is triangulated on the diagonal top-right --> bottom-left
+    //  *      0---1 (s)
+    //  *      |   | 
+    //  *      l  /r  For each t, we get a left and right point (p0, p1); We then
+    //  *      | / |  interpolate the points between (p0, p1).
+    //  *      |/  |
+    //  *      3---2
+    //  *     (t)
+    GPoint** subQuadCoords(const GPoint verts[4], int level) {
+        GPoint** coords = new GPoint*[level + 2];
+        for (int t = 0; t < level + 2; t ++) {
+            GPoint p0 = verts[0] + (verts[3] - verts[0]) * (t / (level + 1));
+            GPoint p1 = verts[1] + (verts[2] - verts[1]) * (t / (level + 1));
+            for (int s = 0; s < level + 2; s ++) {
+                coords[t][s] = p0 + (p1 - p0) * (s / (level + 1));
+            }
+        }
+        return coords;
+    }
+
+    GPoint bilinearInterpolation(float s, float t, const GPoint texs[4]) {
+        return texs[0] * (1 - s) * (1 - t) 
+        + texs[1] * s * (1 - t) 
+        + texs[2] * s * t 
+        + texs[3] * (1 - s) * t;
+    }
+
+    GColor bilinearInterpolation(float s, float t, const GColor colors[4]) {
+        return colors[0] * (1 - s) * (1 - t) 
+        + colors[1] * s * (1 - t) 
+        + colors[2] * s * t 
+        + colors[3] * (1 - s) * t;
     }
 
 
@@ -538,6 +595,9 @@ private:
         // assert(currScanY <= edge.bot);
         return currScanY >= edge.top;
     }
+    
+
+    
     ///////////////////////////////////////////////////////////////////////////////////////////////
 
 };

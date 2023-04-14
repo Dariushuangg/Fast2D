@@ -46,12 +46,13 @@ class TriTexShader : public GShader {
 public:
     TriTexShader(GPoint vertexTexCoords[3], GPoint vertices[3], GShader* shaderProvider) : shaderProvider(shaderProvider) {
         std::copy(vertexTexCoords, vertexTexCoords + 3, TexCoords);
-        GMatrix((vertices[1].fX - vertices[0].fX), (vertices[2].fX - vertices[0].fX), vertices[0].fX, 
-        (vertices[1].fY - vertices[0].fY), (vertices[2].fY - vertices[0].fY), vertices[0].fY).invert(&deviceToBarycentric);
+        //!! or P^-1?
+        P = GMatrix((vertices[1].fX - vertices[0].fX), (vertices[2].fX - vertices[0].fX), vertices[0].fX, 
+        (vertices[1].fY - vertices[0].fY), (vertices[2].fY - vertices[0].fY), vertices[0].fY);
         GMatrix tex_inv;
         GMatrix((TexCoords[1].fX - TexCoords[0].fX), (TexCoords[2].fX - TexCoords[0].fX), TexCoords[0].fX,
         TexCoords[1].fY - TexCoords[0].fY, TexCoords[2].fY - TexCoords[0].fY, TexCoords[0].fY).invert(&tex_inv);
-        m = GMatrix::Concat(deviceToBarycentric, tex_inv);
+        m = GMatrix::Concat(P, tex_inv);
     }
 
     bool isOpaque() {
@@ -68,7 +69,7 @@ public:
 private:
     GShader* shaderProvider;
     GMatrix m;
-    GMatrix deviceToBarycentric;
+    GMatrix P;
     GPoint TexCoords[3];
 };
 
