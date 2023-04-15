@@ -39,6 +39,71 @@ public:
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
+    void drawColorMesh(const GPoint vertices[], const GColor colors[], int count, const int indices[]) {
+        GPoint verts[3];
+        GColor cols[3];
+        for (int i = 0; i < count; i += 3) {
+            verts[0] = vertices[indices[i]];
+            verts[1] = vertices[indices[i+1]];
+            verts[2] = vertices[indices[i+2]];
+
+            cols[0] = colors[indices[i]];
+            cols[1] = colors[indices[i+1]];
+            cols[2] = colors[indices[i+2]];
+
+            std::unique_ptr<GShader> cs = GCreateTriColorShader(cols, verts);
+            drawConvexPolygon(verts, 3, GPaint(cs.get()));
+        }
+    }
+
+    void drawTexMesh(const GPoint vertices[], const GPoint textures[],
+     int count, const int indices[], const GPaint& textureShader) 
+    {
+        GPoint verts[3];
+        GPoint texs[3];
+        for (int i = 0; i < count; i += 3) {
+            verts[0] = vertices[indices[i]];
+            verts[1] = vertices[indices[i+1]];
+            verts[2] = vertices[indices[i+2]];
+
+            texs[0] = textures[indices[i]];
+            texs[1] = textures[indices[i+1]];
+            texs[2] = textures[indices[i+2]];
+
+            std::unique_ptr<GShader> ts 
+                        = GCreateTriTexShader(texs, verts, textureShader.getShader());
+            drawConvexPolygon(verts, 3, GPaint(ts.get()));
+        }
+    }
+
+    void drawColorTexMesh(const GPoint vertices[], const GColor colors[], const GPoint textures[],
+                          int count, const int indices[], const GPaint& textureShader)
+    {
+        GPoint verts[3];
+        GPoint texs[3];
+        GColor cols[3];
+        for (int i = 0; i < count; i += 3) {
+            verts[0] = vertices[indices[i]];
+            verts[1] = vertices[indices[i+1]];
+            verts[2] = vertices[indices[i+2]];
+
+            texs[0] = textures[indices[i]];
+            texs[1] = textures[indices[i+1]];
+            texs[2] = textures[indices[i+2]];
+
+            cols[0] = colors[indices[i]];
+            cols[1] = colors[indices[i+1]];
+            cols[2] = colors[indices[i+2]];
+
+            std::unique_ptr<GShader> ts 
+                        = GCreateTriTexShader(texs, verts, textureShader.getShader());
+            std::unique_ptr<GShader> cs = GCreateTriColorShader(cols, verts);
+            std::unique_ptr<GShader> tcs 
+                        = GCreateTriColorTexShader((TriTexShader*)(ts.get()),
+                            (TriColorShader*)(cs.get()));
+            drawConvexPolygon(verts, 3, GPaint(tcs.get()));
+        }
+    }
 
     void drawMesh(const GPoint verts[], const GColor colors[], const GPoint texs[],
                           int count, const int indices[], const GPaint& textureShader) override 
@@ -47,109 +112,186 @@ public:
         bool hasTex = texs != nullptr;
         if (!hasColor && !hasTex) {
             return;
-        }
-
-        GPoint pts[3];
-        for (int i = 0; i < count; i += 3) {
-            pts[0] = verts[indices[i]];
-            pts[1] = verts[indices[i+1]];
-            pts[2] = verts[indices[i+2]];
-            if (hasColor) {
-                GColor cols[3];
-                cols[0] = colors[indices[i]];
-                cols[1] = colors[indices[i+1]];
-                cols[2] = colors[indices[i+2]];
-                std::unique_ptr<GShader> cs = GCreateTriColorShader(cols, pts);
-                if (hasTex) {
-                    // has color, has texture
-                    GPoint tex[3];
-                    tex[0] = texs[indices[i]];
-                    tex[1] = texs[indices[i+1]];
-                    tex[2] = texs[indices[i+2]];
-                    std::unique_ptr<GShader> ts 
-                        = GCreateTriTexShader(tex, pts, textureShader.getShader());
-                    std::unique_ptr<GShader> tcs 
-                        = GCreateTriColorTexShader((TriTexShader*)(ts.get()),
-                            (TriColorShader*)(cs.get()));
-                    drawConvexPolygon(pts, 3, GPaint(tcs.get()));
-                } else {
-                    // has color, no texture
-                    drawConvexPolygon(pts, 3, GPaint(cs.get()));
-                }
-            } else { // no color, has texture
-                GPoint tex[3];
-                tex[0] = texs[indices[i]];
-                tex[1] = texs[indices[i+1]];
-                tex[2] = texs[indices[i+2]];
-                std::unique_ptr<GShader> ts 
-                    = GCreateTriTexShader(tex, pts, textureShader.getShader());
-                drawConvexPolygon(pts, 3, GPaint(ts.get()));
-            }
+        } else if (hasColor && !hasTex) {
+            drawColorMesh(verts, colors, count, indices);
+        } else if (!hasColor && hasTex) {
+            drawTexMesh(verts, texs, count, indices, textureShader);
+        } else {
+            drawColorTexMesh(verts, colors, texs, count, indices, textureShader);
         }
     }
 
     void drawQuad(const GPoint verts[4], const GColor colors[4], const GPoint texs[4],
                           int level, const GPaint& paint)
     {
-        bool hasColor = colors != nullptr;
-        bool hasTex = texs != nullptr;
-        if (!hasColor && !hasTex) {
-            return;
-        }
-        else if (hasColor && !hasTex) {
-            drawColorQuad(verts, colors, level, paint);
-        } else if (!hasColor && hasTex){
-            drawTexQuad(verts, texs, level, paint);
-        } else {
+        // subdivide the quad according to LoD; Interpolate payload for each sub-quad
+        // Note: Both i_textures and i_colors could be nullptr, but this is already
+        // handled in different branches in drawMesh.
+        GPoint** i_vertices = bilinearInterpolatePayload(verts, level);
+        GPoint** i_textures = bilinearInterpolatePayload(texs, level);
+        GColor** i_colors = bilinearInterpolatePayload(colors, level);
 
-        }
-    }
+        // construct the indices array, which is identical for all payloads 
+        int numOfTriangles = (level + 1) * (level + 1) * 2;
+        int* indices = new int[numOfTriangles * 3];
+        int idx = 0;
+        for (int t = 0; t < level + 1; t ++) {
+            for (int s = 0; s < level + 1; s ++) {
+                // top left triangle
+                indices[idx] = t * (level + 2) + s;
+                indices[idx+1] = indices[idx] + 1;
+                indices[idx+2] = (t + 1) * (level + 2) + s;
+                // bot right triangle
+                indices[idx+3] = indices[idx+2];
+                indices[idx+4] = indices[idx+1];
+                indices[idx+5] = (t + 1) * (level + 2) + (s + 1);
 
-    void drawColorQuad(const GPoint verts[4], const GColor colors[4], int level, const GPaint&) {
-        
-    }
-
-    void drawTexQuad(const GPoint verts[4], const GPoint texs[4], int level, const GPaint&) {
-
-    }
-
-    /// @brief Calculate the coordinates of the vertices of each sub-quads
-    /// @param verts Vertices of the large quad
-    /// @param level LoD
-    /// @return 2-D array of vertices
-    //  *  Each quad is triangulated on the diagonal top-right --> bottom-left
-    //  *      0---1 (s)
-    //  *      |   | 
-    //  *      l  /r  For each t, we get a left and right point (p0, p1); We then
-    //  *      | / |  interpolate the points between (p0, p1).
-    //  *      |/  |
-    //  *      3---2
-    //  *     (t)
-    GPoint** subQuadCoords(const GPoint verts[4], int level) {
-        GPoint** coords = new GPoint*[level + 2];
-        for (int t = 0; t < level + 2; t ++) {
-            GPoint p0 = verts[0] + (verts[3] - verts[0]) * (t / (level + 1));
-            GPoint p1 = verts[1] + (verts[2] - verts[1]) * (t / (level + 1));
-            for (int s = 0; s < level + 2; s ++) {
-                coords[t][s] = p0 + (p1 - p0) * (s / (level + 1));
+                idx += 6;
             }
         }
-        return coords;
+
+        // construct the vert[], colors[], texs[] arrays by flattening
+        //!! is there an alternative to this? Can't I just pass in the 2D array?
+        GPoint* flat_i_vertices = new GPoint[(level + 2) * (level + 2)];
+        for (int i = 0; i < level + 2; i ++) {
+            for (int j = 0; j < level + 2; j ++) {
+                flat_i_vertices[i * (level + 2) + j] = i_vertices[i][j];
+            }
+        }
+
+        GPoint* flat_i_textures;
+        if (i_textures != nullptr) {
+            flat_i_textures = new GPoint[(level + 2) * (level + 2)];
+            for (int i = 0; i < level + 2; i ++) {
+                for (int j = 0; j < level + 2; j ++) {
+                    flat_i_textures[i * (level + 2) + j] = i_textures[i][j];
+                }
+            }
+        } else flat_i_textures = nullptr;
+
+        GColor* flat_i_colors;
+        if (i_colors != nullptr) {
+            flat_i_colors = new GColor[(level + 2) * (level + 2)];
+            for (int i = 0; i < level + 2; i ++) {
+                for (int j = 0; j < level + 2; j ++) {
+                    flat_i_colors[i * (level + 2) + j] = i_colors[i][j];
+                }
+            }
+        } else flat_i_colors = nullptr;
+
+        drawMesh(flat_i_vertices, flat_i_colors, flat_i_textures, numOfTriangles, indices, _?_);
+    }
+    
+
+    // void drawColorQuad(const GPoint verts[4], const GColor colors[4], int level, const GPaint&) {
+    //     GPoint** i_vertices = new GPoint*[level + 2];
+    //     GColor** i_colors = new GColor*[level + 2];
+    //     i_vertices = bilinearInterpolatePayload(verts, level);
+    //     i_colors = bilinearInterpolatePayload(colors, level);
+    //     visitTriangles(i_vertices, level, [&](GPoint* triVertices, int t, int s, bool isTopLeft) {
+    //         if (isTopLeft) {
+    //             GColor cols[3];
+    //             cols[0] = i_colors[t][s];
+    //             cols[1] = i_colors[t][s+1];
+    //             cols[2] = i_colors[t+1][s];
+    //             std::unique_ptr<GShader> cs = GCreateTriColorShader(cols, triVertices);
+    //             drawMesh(triVertices, 3, GPaint(cs.get()));
+    //         } else {
+    //             GColor cols[3];
+    //             cols[0] = i_colors[t+1][s];
+    //             cols[1] = i_colors[t+1][s+1];
+    //             cols[2] = i_colors[t][s+1];
+    //             std::unique_ptr<GShader> cs = GCreateTriColorShader(cols, triVertices);
+    //             drawMesh(triVertices, 3, GPaint(cs.get()));
+    //         }
+    //     });
+    // }
+
+    // void drawTexQuad(const GPoint verts[4], const GPoint texs[4], int level, const GPaint&) {
+
+    // }
+
+    /// @brief Visit each sub-quads to visit the two triangles in the sub-quad
+    /// @param subQuads Vertices of all sub-quads
+    /// @param level LoD of subdivisions
+    /// @param drawCall drawCall on each triangle
+    //  *  Each quad is triangulated on the diagonal top-right --> bottom-left
+    //  *      s=y---s=y+1 (t=x)
+    //  *      |      /|
+    //  *      |     / |
+    //  *      |    /  | 
+    //  *      |   /   |     
+    //  *      |  /    |     
+    //  *      s=y---s=y+1 (t=x+1)
+    template <typename S> void visitTriangles(GPoint** subQuads, int level, S&& drawCall) {
+        for (int t = 0; t < level + 1; t ++) {
+            for (int s = 0; s < level + 1; s ++) {
+                GPoint triVertices[3];
+                triVertices[0] = subQuads[t][s];
+                triVertices[1] = subQuads[t][s+1];
+                triVertices[2] = subQuads[t+1][s];
+                drawCall(triVertices, t, s, true);
+                triVertices[0] = subQuads[t+1][s];
+                triVertices[1] = subQuads[t][s+1];
+                triVertices[2] = subQuads[t+1][s+1];
+                drawCall(triVertices, t, s, false);
+            }
+        }
     }
 
-    GPoint bilinearInterpolation(float s, float t, const GPoint texs[4]) {
-        return texs[0] * (1 - s) * (1 - t) 
-        + texs[1] * s * (1 - t) 
-        + texs[2] * s * t 
-        + texs[3] * (1 - s) * t;
+    /// @brief Bilinear interpolation of payload for each sub-quad after the division
+    /// @param payload the payload to interpolate
+    /// @param level LoD of subdivisions
+    /// @return 2-D array of interpolated payload after the division
+    //  * We divide the original quad into (level + 1) * (level + 1) sub-quads.
+    //  *      0---1 (s)
+    //  *      |   | 
+    //  *      l---r  For each t, we get a left and right point (p0, p1); We then
+    //  *      |   |  interpolate the points between (p0, p1).
+    //  *      |   |
+    //  *      3---2
+    //  *     (t)
+    GPoint** bilinearInterpolatePayload(const GPoint payload[4], int level) {
+        if (payload == nullptr) return nullptr;
+
+        GPoint** interpolations = new GPoint*[level + 2];
+        for (int t = 0; t < level + 2; t ++) {
+            GPoint p0 = payload[0] + (payload[3] - payload[0]) * (t / (level + 1));
+            GPoint p1 = payload[1] + (payload[2] - payload[1]) * (t / (level + 1));
+            for (int s = 0; s < level + 2; s ++) {
+                interpolations[t][s] = p0 + (p1 - p0) * (s / (level + 1));
+            }
+        }
+        return interpolations;
     }
 
-    GColor bilinearInterpolation(float s, float t, const GColor colors[4]) {
-        return colors[0] * (1 - s) * (1 - t) 
-        + colors[1] * s * (1 - t) 
-        + colors[2] * s * t 
-        + colors[3] * (1 - s) * t;
+    GColor** bilinearInterpolatePayload(const GColor payload[4], int level) {
+        if (payload == nullptr) return nullptr;
+
+        GColor** interpolations = new GColor*[level + 2];
+        for (int t = 0; t < level + 2; t ++) {
+            GColor p0 = payload[0] + (payload[3] - payload[0]) * (t / (level + 1));
+            GColor p1 = payload[1] + (payload[2] - payload[1]) * (t / (level + 1));
+            for (int s = 0; s < level + 2; s ++) {
+                interpolations[t][s] = p0 + (p1 - p0) * (s / (level + 1));
+            }
+        }
+        return interpolations;
     }
+
+    // GPoint bilinearInterpolation(float s, float t, const GPoint texs[4]) {
+    //     return texs[0] * (1 - s) * (1 - t) 
+    //     + texs[1] * s * (1 - t) 
+    //     + texs[2] * s * t 
+    //     + texs[3] * (1 - s) * t;
+    // }
+
+    // GColor bilinearInterpolation(float s, float t, const GColor colors[4]) {
+    //     return colors[0] * (1 - s) * (1 - t) 
+    //     + colors[1] * s * (1 - t) 
+    //     + colors[2] * s * t 
+    //     + colors[3] * (1 - s) * t;
+    // }
 
 
     /**
