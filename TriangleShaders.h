@@ -49,13 +49,15 @@ public:
         P = GMatrix((vertices[1].fX - vertices[0].fX), (vertices[2].fX - vertices[0].fX), vertices[0].fX, 
         (vertices[1].fY - vertices[0].fY), (vertices[2].fY - vertices[0].fY), vertices[0].fY);
         GMatrix tex_inv;
-        GMatrix((TexCoords[1].fX - TexCoords[0].fX), (TexCoords[2].fX - TexCoords[0].fX), TexCoords[0].fX,
-        TexCoords[1].fY - TexCoords[0].fY, TexCoords[2].fY - TexCoords[0].fY, TexCoords[0].fY).invert(&tex_inv);
+        GMatrix tex = GMatrix((TexCoords[1].fX - TexCoords[0].fX), (TexCoords[2].fX - TexCoords[0].fX), TexCoords[0].fX,
+        (TexCoords[1].fY - TexCoords[0].fY), (TexCoords[2].fY - TexCoords[0].fY), TexCoords[0].fY);
+        tex.invert(&tex_inv);
         m = GMatrix::Concat(P, tex_inv);
     }
 
     bool isOpaque() {
-        return shaderProvider->isOpaque();
+        return false;
+        // return shaderProvider->isOpaque();
     }
 
     bool setContext(const GMatrix& ctm) {
@@ -87,16 +89,26 @@ public:
 
     void shadeRow(int x, int y, int count, GPixel row[]) {
         GPixel* texRow = new GPixel[count];
+        GPixel* colorRow = new GPixel[count];
         ts->shadeRow(x, y, count, texRow);
-        cs->shadeRow(x, y, count, row);
+        cs->shadeRow(x, y, count, colorRow);
         for (int i = 0; i < count; i ++) {
-            // ans[i] = (row[i]/255) * (texRow[i]/255) * 255
-            row[i] = row[i] * texRow[i] / 255; 
+            unsigned resA = div255(GPixel_GetA(texRow[i]) * GPixel_GetA(colorRow[i]));
+            unsigned resR = div255(GPixel_GetR(texRow[i]) * GPixel_GetR(colorRow[i]));
+            unsigned resG = div255(GPixel_GetG(texRow[i]) * GPixel_GetG(colorRow[i]));
+            unsigned resB = div255(GPixel_GetB(texRow[i]) * GPixel_GetB(colorRow[i]));
+            row[i] = GPixel_PackARGB(resA, resR, resG, resB);
         }
     }
 private:
     TriTexShader* ts;
     TriColorShader* cs;
+
+    // had a weird include issue; Just move it from GBlender to here.
+    unsigned div255(unsigned x) {
+        x += 128;
+        return (x << 8) + x >> 16;
+    } 
 };
 
 std::unique_ptr<GShader> GCreateTriColorShader(GColor vertexColors[3], GPoint vertices[3]) {
