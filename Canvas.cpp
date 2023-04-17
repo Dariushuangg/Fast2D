@@ -256,6 +256,7 @@ public:
 
         GPoint** interpolations = new GPoint*[level + 2];
         for (int t = 0; t < level + 2; t ++) {
+            interpolations[t] = new GPoint[level + 2];
             GPoint p0 = payload[0] + (payload[3] - payload[0]) * (t / (level + 1));
             GPoint p1 = payload[1] + (payload[2] - payload[1]) * (t / (level + 1));
             for (int s = 0; s < level + 2; s ++) {

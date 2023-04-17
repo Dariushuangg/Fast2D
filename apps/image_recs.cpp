@@ -44,8 +44,8 @@ const GDrawRec gDrawRecs[] = {
     // { draw_tri,         512, 512,   "tri_color",   6 },
     // { draw_tri2,        512, 512,   "tri_texture", 6 },
     // { mesh_1,           512, 512,   "sweep_mesh",  6 },
+    // { mesh_3,           512, 512,   "both_mesh",   6 },
     { spock_quad,       512, 512,   "spock_quad",  6 },
-    { mesh_3,           512, 512,   "both_mesh",   6 },
     { color_quad,       512, 512,   "color_quad",  6 },
 
     { nullptr, 0, 0, nullptr },
