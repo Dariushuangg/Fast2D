@@ -266,26 +266,12 @@ public:
         return interpolations;
     }
 
-    GPoint** TextureInterpolate(const GPoint payload[4], int level) {
-        if (payload == nullptr) return nullptr;
-
-        GPoint** interpolations = new GPoint*[level + 2];
-        for (int t = 0; t < level + 2; t ++) {
-            interpolations[t] = new GPoint[level + 2];
-            GPoint p0 = payload[0] + (payload[3] - payload[0]) * (t / (level + 1));
-            GPoint p1 = payload[1] + (payload[2] - payload[1]) * (t / (level + 1));
-            for (int s = 0; s < level + 2; s ++) {
-                interpolations[t][s] = p0 + (p1 - p0) * (s / (level + 1));
-            }
-        }
-        return interpolations;
-    }
-
     GColor** bilinearInterpolatePayload(const GColor payload[4], int level) {
         if (payload == nullptr) return nullptr;
 
         GColor** interpolations = new GColor*[level + 2];
         for (int t = 0; t < level + 2; t ++) {
+            interpolations[t] = new GColor[level + 2];
             GColor p0 = payload[0] + (payload[3] - payload[0]) * ((float)t / (level + 1));
             GColor p1 = payload[1] + (payload[2] - payload[1]) * ((float)t / (level + 1));
             for (int s = 0; s < level + 2; s ++) {
