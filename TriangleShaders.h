@@ -1,7 +1,6 @@
 #include "./include/GShader.h"
 #include "./include/GMatrix.h"
 #include "./include/GColor.h"
-#include "./GBlenders.h"
 
 class TriColorShader : public GShader {
 public:

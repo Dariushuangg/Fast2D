@@ -42,7 +42,7 @@ public:
     void drawColorMesh(const GPoint vertices[], const GColor colors[], int count, const int indices[]) {
         GPoint verts[3];
         GColor cols[3];
-        for (int i = 0; i < count; i += 3) {
+        for (int i = 0; i < 3 * count; i += 3) {
             verts[0] = vertices[indices[i]];
             verts[1] = vertices[indices[i+1]];
             verts[2] = vertices[indices[i+2]];
@@ -61,7 +61,7 @@ public:
     {
         GPoint verts[3];
         GPoint texs[3];
-        for (int i = 0; i < count; i += 3) {
+        for (int i = 0; i < 3 * count; i += 3) {
             verts[0] = vertices[indices[i]];
             verts[1] = vertices[indices[i+1]];
             verts[2] = vertices[indices[i+2]];
@@ -82,7 +82,7 @@ public:
         GPoint verts[3];
         GPoint texs[3];
         GColor cols[3];
-        for (int i = 0; i < count; i += 3) {
+        for (int i = 0; i < 3 * count; i += 3) {
             verts[0] = vertices[indices[i]];
             verts[1] = vertices[indices[i+1]];
             verts[2] = vertices[indices[i+2]];
@@ -179,7 +179,7 @@ public:
             }
         } else flat_i_colors = nullptr;
 
-        drawMesh(flat_i_vertices, flat_i_colors, flat_i_textures, numOfTriangles, indices, _?_);
+        drawMesh(flat_i_vertices, flat_i_colors, flat_i_textures, numOfTriangles, indices, paint);
     }
     
 
