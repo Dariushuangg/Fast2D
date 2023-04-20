@@ -1,3 +1,9 @@
+/**
+ * @author Darius Huang
+ * @copyright Copyright (c) 2023
+ * 
+ */
+
 #include "./include/GPath.h"
 #include "./include/GCanvas.h"
 #include "./include/GBitmap.h"
@@ -20,9 +26,9 @@ public:
         matrixStack.push(GMatrix());
     }
 
+    /////////////////////////////////////////////////////////////////////////// 
+    // Matrix stack operations
     void save() {
-        // duplicate the top matrix, so that following operation will be based
-        // upon the current matrix, but the current matrix is stored as well
         matrixStack.push(matrixStack.top()); 
     }
 
@@ -31,14 +37,260 @@ public:
     }
 
     void concat(const GMatrix& matrix) {
-        // Modify the top matrix
         GMatrix top = matrixStack.top();
         GMatrix newTop = GMatrix::Concat(top, matrix);
         matrixStack.pop();
         matrixStack.push(newTop);
     }
+    ///////////////////////////////////////////////////////////////////////////////////////////////
+    // Draw calls
+    
+    /// @brief Draw triangle meshes based upon the provided payload.
+    /// @param verts List of vertices coordinates.
+    /// @param colors List of colors; Could be null if no color is used.
+    /// @param texs List of texture UV; Could be null if no texture is used.
+    /// @param count Number of triangles.
+    /// @param indices List of indices into the payload arrays.
+    /// @param textureShader The texture provider, if texture is used.
+    void drawMesh(const GPoint verts[], const GColor colors[], const GPoint texs[],
+                          int count, const int indices[], const GPaint& textureShader) override 
+    {
+        bool hasColor = colors != nullptr;
+        bool hasTex = texs != nullptr;
+        if (!hasColor && !hasTex) {
+            return;
+        } else if (hasColor && !hasTex) {
+            drawColorMesh(verts, colors, count, indices);
+        } else if (!hasColor && hasTex) {
+            drawTexMesh(verts, texs, count, indices, textureShader);
+        } else {
+            drawColorTexMesh(verts, colors, texs, count, indices, textureShader);
+        }
+    }
+
+    /// @brief Draw a quad mesh based upon the provided payload.
+    /// @param verts List of vertices coordinates.
+    /// @param colors List of colors; Could be null if no color is used.
+    /// @param texs List of texture UV; Could be null if no texture is used.
+    /// @param level Level of details for subdivisions.
+    /// @param paint Paint of the quad.
+    void drawQuad(const GPoint verts[4], const GColor colors[4], const GPoint texs[4],
+                          int level, const GPaint& paint)
+    {
+        GPoint** i_vertices = bilinearInterpolatePayload(verts, level);
+        GPoint** i_textures = bilinearInterpolatePayload(texs, level);
+        GColor** i_colors = bilinearInterpolatePayload(colors, level);
+
+        // construct the indices array, which is identical for all payloads 
+        int numOfTriangles = (level + 1) * (level + 1) * 2;
+        int* indices = new int[numOfTriangles * 3];
+        int idx = 0;
+        for (int t = 0; t < level + 1; t ++) {
+            for (int s = 0; s < level + 1; s ++) {
+                // top left triangle
+                indices[idx] = t * (level + 2) + s;
+                indices[idx+1] = indices[idx] + 1;
+                indices[idx+2] = (t + 1) * (level + 2) + s;
+                // bot right triangle
+                indices[idx+3] = indices[idx+2];
+                indices[idx+4] = indices[idx+1];
+                indices[idx+5] = (t + 1) * (level + 2) + (s + 1);
+
+                idx += 6;
+            }
+        }
+
+        // construct the vert[], colors[], texs[] arrays by flattening
+        GPoint* flat_i_vertices = new GPoint[(level + 2) * (level + 2)];
+        for (int i = 0; i < level + 2; i ++) {
+            for (int j = 0; j < level + 2; j ++) {
+                flat_i_vertices[i * (level + 2) + j] = i_vertices[i][j];
+            }
+        }
+
+        GPoint* flat_i_textures;
+        if (i_textures != nullptr) {
+            flat_i_textures = new GPoint[(level + 2) * (level + 2)];
+            for (int i = 0; i < level + 2; i ++) {
+                for (int j = 0; j < level + 2; j ++) {
+                    flat_i_textures[i * (level + 2) + j] = i_textures[i][j];
+                }
+            }
+        } else flat_i_textures = nullptr;
+
+        GColor* flat_i_colors;
+        if (i_colors != nullptr) {
+            flat_i_colors = new GColor[(level + 2) * (level + 2)];
+            for (int i = 0; i < level + 2; i ++) {
+                for (int j = 0; j < level + 2; j ++) {
+                    flat_i_colors[i * (level + 2) + j] = i_colors[i][j];
+                }
+            }
+        } else flat_i_colors = nullptr;
+
+        drawMesh(flat_i_vertices, flat_i_colors, flat_i_textures, numOfTriangles, indices, paint);
+    }
+
+    /// @brief Draw a rectangle given the shape and the paint.
+    /// @param rect ~
+    /// @param paint ~
+    void drawRect(const GRect& rect, const GPaint& paint) {
+        GPoint pts[4];
+        pts[0] = { rect.fLeft,  rect.fTop };
+        pts[1] = { rect.fRight, rect.fTop };
+        pts[2] = { rect.fRight, rect.fBottom };
+        pts[3] = { rect.fLeft,  rect.fBottom };
+        
+        drawConvexPolygon(pts, 4, paint);
+    };
+
+    /// @brief Fill the entire canvas with the specified color, using the specified blendmode.
+    /// @param paint Paint of the screen.
+    void drawPaint(const GPaint& paint) override {
+        rowBlender rb = blenders.getBlender(paint.getBlendMode());
+        GShader* shaderptr = paint.getShader();
+        if (shaderptr == nullptr) {
+            // No shader is used
+            GPixel srcPixel = Blenders::prepSrcPixel(paint.getColor());
+            for (int r = 0; r < fDevice.height(); r ++) {
+                rb(0, fDevice.width(), &srcPixel, false, fDevice.getAddr(0, r));
+            }
+        } else {
+            shaderptr->setContext(matrixStack.top()); 
+            int rowBytes = fDevice.rowBytes() >> 2;
+            for (int r = 0; r < fDevice.height(); r ++) {
+                shaderptr->shadeRow(0, r, fDevice.width(), fDevice.pixels()+ r * rowBytes);
+            }
+        }
+    }
+
+    /// @brief Draw a path using the specified paint.
+    /// @param cpath ~
+    /// @param paint ~
+    void drawPath(const GPath& cpath, const GPaint& paint) {
+        // Set the shader's context, if a shader is used.
+        GShader* shaderptr = paint.getShader();
+        bool hasShader = (shaderptr != nullptr);
+        if (hasShader) {
+            shaderptr->setContext(matrixStack.top());
+        }
+
+        // Transform the points from model space to device space using the ctm
+        GPath path = cpath;
+        path.transform(matrixStack.top());
+
+        vector<GEdge> edges = assembleEdges(path);
+
+        std::sort(edges.begin(), edges.end(), [](const GEdge& e1, const GEdge& e2){
+            if (e1.top == e2.top) {
+                float x1 = e1.m * (e1.top + 0.5) + e1.b;
+                float x2 = e2.m * (e2.top + 0.5) + e2.b;
+                return x1 < x2;
+            } else return e1.top < e2.top;
+        }); 
+        
+        for (int y = 0; y < fDevice.height();) {
+            if (edges.size() == 0) return;
+
+            // Blit the scan line
+            int i = 0;
+            int w = 0;
+            int left, right = 0;
+            while (i < static_cast<int>(edges.size()) && edges[i].top <= y) {
+                GEdge currEdge = edges[i];
+                int x = GRoundToInt(currEdge.m * ((float)y + 0.5) + currEdge.b); //!! Refactor into a GEdge method
+                if (w == 0) {
+                    left = x;
+                }
+                w += currEdge.orientation;
+                if (w == 0) {
+                    // the loop is closed
+                    right = x;
+                    fillRow(left, right, y, paint, hasShader);
+                }
+                if (edgeHasExpired(currEdge, y, edges)) {
+                    // printf("erasing edge at index %d; edges.size = %d \n", i, edges.size());
+                    edges.erase(edges.begin() + i);
+                } else {
+                    i++;
+                }
+            }
+
+            y++;
+
+            // Find active edges
+            // move index to include edges that will (in the next) be valid
+            while (i < static_cast<int>(edges.size()) && isActive(edges[i], y)) {
+                i++;
+            }
+
+            // Resort active edges
+            resortByCurrX(edges, y, i);
+
+        }
+    }
+
+    /// @brief Draw any convex polygon.
+    /// @param points Vertices of the polygon.
+    /// @param count Number of vertices.
+    /// @param paint Paint to fill the polygon with.
+    void drawConvexPolygon(const GPoint points[], int count, const GPaint& paint) {    
+        assert(count >= 0);
+        // Set the shader's context, if a shader is used.
+        GShader* shaderptr = paint.getShader();
+        bool hasShader = (shaderptr != nullptr);
+        if (hasShader) {
+            shaderptr->setContext(matrixStack.top());
+        }
+
+        // Transform the points from model space to device space using the ctm
+        GPoint* transformedPoints = new GPoint[count];
+        matrixStack.top().mapPoints(transformedPoints, points, count);
+
+        // Prepare edges
+        vector<GEdge> edges = assembleEdges(transformedPoints, count);
+        delete[] transformedPoints; // Prevent memory leak
+        std::sort(edges.begin(), edges.end(), [](const GEdge& e1, const GEdge& e2){
+            if (e1.top == e2.top) {
+            return e1.bot < e2.bot;
+            } else return e1.top < e2.top;
+        }); // sort by Y
+        for (int y = 0; y < fDevice.height(); y++) {
+            if (edges.empty() || edges.size() == 1) break;
+            // Pick edges with the smallest y value (closer to the top of screen)
+            GEdge e1 = edges[0]; 
+            GEdge e2 = edges[1];
+            if (e2.top < e1.top) {
+                GEdge temp = e2;
+                e2 = e1;
+                e1 = temp;
+            }
+            if (y < e1.top || y > e2.bot) continue;
+            // Calculate left and right-most pixel covered by the shape
+            int idx1 = GRoundToInt(e1.m * ((float)y + 0.5) + e1.b);
+            int idx2 = GRoundToInt(e2.m * ((float)y + 0.5) + e2.b);
+
+            // Fill the entire row of pixel between left and right index
+            if (idx1 == idx2) { /* don't draw */ }
+            else if (idx1 < idx2) fillRow(idx1, idx2 - 1, y, paint, hasShader);
+            else fillRow(idx2, idx1 - 1, y, paint, hasShader);
+
+            // Retire expired edges by removing them; We maintain the invariance
+            // that edges with smallest y always has the smallest index in the array
+            if (edgeHasExpired(e2, y, edges)) edges.erase(edges.begin() + 1);
+            if (edgeHasExpired(e1, y, edges)) edges.erase(edges.begin());
+        }
+    };
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
+
+private:
+    GBitmap fDevice;
+    Blenders blenders;
+    stack<GMatrix> matrixStack;
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////
+
     void drawColorMesh(const GPoint vertices[], const GColor colors[], int count, const int indices[]) {
         GPoint verts[3];
         GColor cols[3];
@@ -105,140 +357,6 @@ public:
         }
     }
 
-    void drawMesh(const GPoint verts[], const GColor colors[], const GPoint texs[],
-                          int count, const int indices[], const GPaint& textureShader) override 
-    {
-        bool hasColor = colors != nullptr;
-        bool hasTex = texs != nullptr;
-        if (!hasColor && !hasTex) {
-            return;
-        } else if (hasColor && !hasTex) {
-            drawColorMesh(verts, colors, count, indices);
-        } else if (!hasColor && hasTex) {
-            drawTexMesh(verts, texs, count, indices, textureShader);
-        } else {
-            drawColorTexMesh(verts, colors, texs, count, indices, textureShader);
-        }
-    }
-
-    void drawQuad(const GPoint verts[4], const GColor colors[4], const GPoint texs[4],
-                          int level, const GPaint& paint)
-    {
-        // subdivide the quad according to LoD; Interpolate payload for each sub-quad
-        // Note: Both i_textures and i_colors could be nullptr, but this is already
-        // handled in different branches in drawMesh.
-        GPoint** i_vertices = bilinearInterpolatePayload(verts, level);
-        GPoint** i_textures = bilinearInterpolatePayload(texs, level);
-        GColor** i_colors = bilinearInterpolatePayload(colors, level);
-
-        // construct the indices array, which is identical for all payloads 
-        int numOfTriangles = (level + 1) * (level + 1) * 2;
-        int* indices = new int[numOfTriangles * 3];
-        int idx = 0;
-        for (int t = 0; t < level + 1; t ++) {
-            for (int s = 0; s < level + 1; s ++) {
-                // top left triangle
-                indices[idx] = t * (level + 2) + s;
-                indices[idx+1] = indices[idx] + 1;
-                indices[idx+2] = (t + 1) * (level + 2) + s;
-                // bot right triangle
-                indices[idx+3] = indices[idx+2];
-                indices[idx+4] = indices[idx+1];
-                indices[idx+5] = (t + 1) * (level + 2) + (s + 1);
-
-                idx += 6;
-            }
-        }
-
-        // construct the vert[], colors[], texs[] arrays by flattening
-        //!! is there an alternative to this? Can't I just pass in the 2D array?
-        GPoint* flat_i_vertices = new GPoint[(level + 2) * (level + 2)];
-        for (int i = 0; i < level + 2; i ++) {
-            for (int j = 0; j < level + 2; j ++) {
-                flat_i_vertices[i * (level + 2) + j] = i_vertices[i][j];
-            }
-        }
-
-        GPoint* flat_i_textures;
-        if (i_textures != nullptr) {
-            flat_i_textures = new GPoint[(level + 2) * (level + 2)];
-            for (int i = 0; i < level + 2; i ++) {
-                for (int j = 0; j < level + 2; j ++) {
-                    flat_i_textures[i * (level + 2) + j] = i_textures[i][j];
-                }
-            }
-        } else flat_i_textures = nullptr;
-
-        GColor* flat_i_colors;
-        if (i_colors != nullptr) {
-            flat_i_colors = new GColor[(level + 2) * (level + 2)];
-            for (int i = 0; i < level + 2; i ++) {
-                for (int j = 0; j < level + 2; j ++) {
-                    flat_i_colors[i * (level + 2) + j] = i_colors[i][j];
-                }
-            }
-        } else flat_i_colors = nullptr;
-
-        drawMesh(flat_i_vertices, flat_i_colors, flat_i_textures, numOfTriangles, indices, paint);
-    }
-    
-
-    // void drawColorQuad(const GPoint verts[4], const GColor colors[4], int level, const GPaint&) {
-    //     GPoint** i_vertices = new GPoint*[level + 2];
-    //     GColor** i_colors = new GColor*[level + 2];
-    //     i_vertices = bilinearInterpolatePayload(verts, level);
-    //     i_colors = bilinearInterpolatePayload(colors, level);
-    //     visitTriangles(i_vertices, level, [&](GPoint* triVertices, int t, int s, bool isTopLeft) {
-    //         if (isTopLeft) {
-    //             GColor cols[3];
-    //             cols[0] = i_colors[t][s];
-    //             cols[1] = i_colors[t][s+1];
-    //             cols[2] = i_colors[t+1][s];
-    //             std::unique_ptr<GShader> cs = GCreateTriColorShader(cols, triVertices);
-    //             drawMesh(triVertices, 3, GPaint(cs.get()));
-    //         } else {
-    //             GColor cols[3];
-    //             cols[0] = i_colors[t+1][s];
-    //             cols[1] = i_colors[t+1][s+1];
-    //             cols[2] = i_colors[t][s+1];
-    //             std::unique_ptr<GShader> cs = GCreateTriColorShader(cols, triVertices);
-    //             drawMesh(triVertices, 3, GPaint(cs.get()));
-    //         }
-    //     });
-    // }
-
-    // void drawTexQuad(const GPoint verts[4], const GPoint texs[4], int level, const GPaint&) {
-
-    // }
-
-    /// @brief Visit each sub-quads to visit the two triangles in the sub-quad
-    /// @param subQuads Vertices of all sub-quads
-    /// @param level LoD of subdivisions
-    /// @param drawCall drawCall on each triangle
-    //  *  Each quad is triangulated on the diagonal top-right --> bottom-left
-    //  *      s=y---s=y+1 (t=x)
-    //  *      |      /|
-    //  *      |     / |
-    //  *      |    /  | 
-    //  *      |   /   |     
-    //  *      |  /    |     
-    //  *      s=y---s=y+1 (t=x+1)
-    template <typename S> void visitTriangles(GPoint** subQuads, int level, S&& drawCall) {
-        for (int t = 0; t < level + 1; t ++) {
-            for (int s = 0; s < level + 1; s ++) {
-                GPoint triVertices[3];
-                triVertices[0] = subQuads[t][s];
-                triVertices[1] = subQuads[t][s+1];
-                triVertices[2] = subQuads[t+1][s];
-                drawCall(triVertices, t, s, true);
-                triVertices[0] = subQuads[t+1][s];
-                triVertices[1] = subQuads[t][s+1];
-                triVertices[2] = subQuads[t+1][s+1];
-                drawCall(triVertices, t, s, false);
-            }
-        }
-    }
-
     /// @brief Bilinear interpolation of payload for each sub-quad after the division
     /// @param payload the payload to interpolate
     /// @param level LoD of subdivisions
@@ -281,197 +399,14 @@ public:
         return interpolations;
     }
 
-    // GPoint bilinearInterpolation(float s, float t, const GPoint texs[4]) {
-    //     return texs[0] * (1 - s) * (1 - t) 
-    //     + texs[1] * s * (1 - t) 
-    //     + texs[2] * s * t 
-    //     + texs[3] * (1 - s) * t;
-    // }
-
-    // GColor bilinearInterpolation(float s, float t, const GColor colors[4]) {
-    //     return colors[0] * (1 - s) * (1 - t) 
-    //     + colors[1] * s * (1 - t) 
-    //     + colors[2] * s * t 
-    //     + colors[3] * (1 - s) * t;
-    // }
-
-
-    /**
-     *  Fill the entire canvas with the specified color, using the specified blendmode.
-     */
-    void drawPaint(const GPaint& paint) override {
-        rowBlender rb = blenders.getBlender(paint.getBlendMode());
-        GShader* shaderptr = paint.getShader();
-        if (shaderptr == nullptr) {
-            // No shader is used
-            GPixel srcPixel = Blenders::prepSrcPixel(paint.getColor());
-            // GPixel emptyPixel = GPixel_PackARGB(0, 0, 0, 0); //!! missing this logic hmm...
-            for (int r = 0; r < fDevice.height(); r ++) {
-                rb(0, fDevice.width(), &srcPixel, false, fDevice.getAddr(0, r));
-            }
-        } else {
-            // Shader is used
-            
-            // for GradientShader, we must setContext; If it's
-            // basic shader, context will be set to identity so doesn't hurt
-            shaderptr->setContext(matrixStack.top()); 
-            int rowBytes = fDevice.rowBytes() >> 2;
-            for (int r = 0; r < fDevice.height(); r ++) {
-                shaderptr->shadeRow(0, r, fDevice.width(), fDevice.pixels()+ r * rowBytes);
-            }
-        }
-    }
-
-    void drawRect(const GRect& rect, const GPaint& paint) {
-        GPoint pts[4];
-        pts[0] = { rect.fLeft,  rect.fTop };
-        pts[1] = { rect.fRight, rect.fTop };
-        pts[2] = { rect.fRight, rect.fBottom };
-        pts[3] = { rect.fLeft,  rect.fBottom };
-        
-        drawConvexPolygon(pts, 4, paint);
-    };
-
-    void drawConvexPolygon(const GPoint points[], int count, const GPaint& paint) {    
-        assert(count >= 0);
-        // Set the shader's context, if a shader is used.
-        GShader* shaderptr = paint.getShader();
-        bool hasShader = (shaderptr != nullptr);
-        if (hasShader) {
-            shaderptr->setContext(matrixStack.top());
-        }
-
-        // Transform the points from model space to device space using the ctm
-        GPoint* transformedPoints = new GPoint[count];
-        matrixStack.top().mapPoints(transformedPoints, points, count);
-
-        // Prepare edges
-        vector<GEdge> edges = assembleEdges(transformedPoints, count);
-        delete[] transformedPoints; // Prevent memory leak
-        std::sort(edges.begin(), edges.end(), [](const GEdge& e1, const GEdge& e2){
-            if (e1.top == e2.top) {
-            return e1.bot < e2.bot;
-            } else return e1.top < e2.top;
-        }); // sort by Y
-        for (int y = 0; y < fDevice.height(); y++) {
-            if (edges.empty() || edges.size() == 1) break;
-            // Pick edges with the smallest y value (closer to the top of screen)
-            GEdge e1 = edges[0]; //!! Opt: don't need to create instance
-            GEdge e2 = edges[1];
-            // printf("Picked edge 1, top %d, bot %d, m %f, b %f \n", e1.top, e1.bot, e1.m, e1.b);
-            // printf("Picked edge 2, top %d, bot %d, m %f, b %f \n", e2.top, e2.bot, e2.m, e2.b);
-            // if (edgeHasExpired(e1, y) || edgeHasExpired(e2, y)) assert( 1 == 1 );
-            if (e2.top < e1.top) {
-                GEdge temp = e2;
-                e2 = e1;
-                e1 = temp;
-            }
-            if (y < e1.top || y > e2.bot) continue;
-            // Calculate left and right-most pixel covered by the shape
-            int idx1 = GRoundToInt(e1.m * ((float)y + 0.5) + e1.b);
-            int idx2 = GRoundToInt(e2.m * ((float)y + 0.5) + e2.b);
-
-            // Fill the entire row of pixel between left and right index
-            if (idx1 == idx2) { /* don't draw */ }
-            else if (idx1 < idx2) fillRow(idx1, idx2 - 1, y, paint, hasShader);
-            else fillRow(idx2, idx1 - 1, y, paint, hasShader);
-
-            // Retire expired edges by removing them; We maintain the invariance
-            // that edges with smallest y always has the smallest index in the array
-            if (edgeHasExpired(e2, y, edges)) edges.erase(edges.begin() + 1);
-            if (edgeHasExpired(e1, y, edges)) edges.erase(edges.begin());
-        }
-    };
-
-    void drawPath(const GPath& cpath, const GPaint& paint) {
-        // Set the shader's context, if a shader is used.
-        GShader* shaderptr = paint.getShader();
-        bool hasShader = (shaderptr != nullptr);
-        if (hasShader) {
-            shaderptr->setContext(matrixStack.top());
-        }
-
-        // Transform the points from model space to device space using the ctm
-        GPath path = cpath;
-        path.transform(matrixStack.top());
-
-        vector<GEdge> edges = assembleEdges(path);
-
-        std::sort(edges.begin(), edges.end(), [](const GEdge& e1, const GEdge& e2){
-            if (e1.top == e2.top) {
-                float x1 = e1.m * (e1.top + 0.5) + e1.b;
-                float x2 = e2.m * (e2.top + 0.5) + e2.b;
-                return x1 < x2;
-            } else return e1.top < e2.top;
-        }); // sort by Y -> then by X
-        
-        // GRect bound = path.bounds();
-        // int top = (int) max(bound.top(), 0.0f);
-        // int bot = (int) min(bound.bottom(), (float)(fDevice.height() - 1));
-        // Adding the above somehow make it slower..
-        for (int y = 0; y < fDevice.height();) {
-            if (edges.size() == 0) return;
-
-            // Blit the scan line
-            int i = 0;
-            int w = 0;
-            int left, right = 0;
-            while (i < static_cast<int>(edges.size()) && edges[i].top <= y) {
-                GEdge currEdge = edges[i];
-                int x = GRoundToInt(currEdge.m * ((float)y + 0.5) + currEdge.b); //!! Refactor into a GEdge method
-                if (w == 0) {
-                    left = x;
-                }
-                w += currEdge.orientation;
-                if (w == 0) {
-                    // the loop is closed
-                    right = x;
-                    fillRow(left, right, y, paint, hasShader);
-                }
-                if (edgeHasExpired(currEdge, y, edges)) {
-                    // printf("erasing edge at index %d; edges.size = %d \n", i, edges.size());
-                    edges.erase(edges.begin() + i);
-                } else {
-                    i++;
-                }
-            }
-
-            y++;
-
-            // Find active edges
-            // move index to include edges that will (in the next) be valid
-            while (i < static_cast<int>(edges.size()) && isActive(edges[i], y)) {
-                i++;
-            }
-
-            // Resort active edges
-            resortByCurrX(edges, y, i);
-
-        }
-    }
-
-    ///////////////////////////////////////////////////////////////////////////////////////////////
-
-private:
-    GBitmap fDevice;
-    Blenders blenders;
-    stack<GMatrix> matrixStack;
-
-    ///////////////////////////////////////////////////////////////////////////////////////////////
-
     /**
      * @brief Determine if the scan line is the last scan line that will 
      * touch the given edge.
      */
     bool edgeHasExpired(GEdge edge, int scan, vector<GEdge>edges) {
         if (!(scan <= edge.bot && scan >= edge.top)){
-            // printf("ops!");
-            // printf("edges size = %d \n", edges.size());
+            
         }
-        // if (scan == edge.bot - 1) {
-        //     printf("edge with bot = %d expired at y = %d \n", edge.bot, scan);
-        // }
-        // assert(scan <= edge.bot && scan >= edge.top);
         return scan == edge.bot - 1;
     }
 
